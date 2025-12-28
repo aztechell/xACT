@@ -1,5 +1,5 @@
 # xACT — Action Composition Toolkit
-
+Latest release: [v0.1.0](https://github.com/De-Velop/xACT/releases/latest)
 > kz версия: [README.kz.md](README.kz.md)
 
 > 🇷🇺 версия: [README.ru.md](README.ru.md)
@@ -40,9 +40,6 @@ and maintainable mission logic.
 ---
 
 ## Credits
-
-**xACT — Action Composition Toolkit**  
-Developed by **FTC Team “xCellence” #28300**
 
 If you use this framework, please credit:  
 *xACT by FTC Team “xCellence” #28300*
