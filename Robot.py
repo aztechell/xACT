@@ -35,19 +35,32 @@ def angle_wrap(value):
 
 
 class Robot:
-    def __init__(self, hub: PrimeHub):
-        print("\033[3J\033[H\033[2J", end="")   # очистить консоль
+    def __init__(
+        self,
+        hub: PrimeHub,
+        left_port: Port,
+        right_port: Port,
+        arm_left_port: Port,
+        arm_right_port: Port,
+        left_dir=Direction.COUNTERCLOCKWISE,
+        right_dir=Direction.CLOCKWISE
+    ):
+        print("\033[3J\033[H\033[2J", end="")
         self.hub = hub
-        print(f"Voltage: {hub.battery.voltage()/1000} V")
+
+        v = hub.battery.voltage()/1000
+        v_min = 6.4   # 0%
+        v_max = 8.4   # 100%
+        percent = (v - v_min) / (v_max - v_min) * 100
+        percent = max(0, min(100, percent))
+        print(f"Battery: {round(percent)}% ({v:.2f} V)")
         print(f"Current: {hub.battery.current()/1000} A")
+
         self.left = Motor(Port.E, Direction.COUNTERCLOCKWISE)
         self.right = Motor(Port.A)
-        self.left.reset_angle(0)
-        self.right.reset_angle(0)
         self.ArmLeft = Motor(Port.F)
         self.ArmRight = Motor(Port.B)
         self.ArmLeft.reset_angle(0)
-        #self.ArmLeft.run_target(100, 0, Stop.HOLD, True)
         self.ArmRight.reset_angle(0)
 
         while not self.hub.imu.ready():
@@ -353,3 +366,4 @@ class Robot:
             
                 return True
         return ResetOdometryAction(self)
+
