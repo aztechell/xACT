@@ -1,16 +1,16 @@
 from pybricks.hubs import PrimeHub
 from pybricks.tools import wait, hub_menu
 from pybricks.parameters import Axis, Port
-from Action import ParallelAction, SequentialAction
-from Robot import Robot
-from missions import mission_list  # list of mission functions
+from xAct_action import ParallelAction, SequentialAction
+from xAct_robot import Robot
+from xAct_missions import mission_list  # list of mission functions
 
 # --- Initialize hub and robot ---
 hub = PrimeHub(front_side=Axis.Y, top_side=Axis.Z)
 robot = Robot(
     hub,
-    left_port=Port.E,
-    right_port=Port.A,
+    left_motor=Port.E,
+    right_motor=Port.A,
     arm_left_port=Port.F,
     arm_right_port=Port.B
 )
