@@ -1,7 +1,7 @@
 # === xAct_robot.py ===
 # --- TODO: Выделить Actions в отдельный файл  --- 
 from pybricks.hubs import PrimeHub
-from pybricks.pupdevices import Motor
+from pybricks.pupdevices import Motor, ColorSensor
 from pybricks.parameters import Port, Direction, Stop
 from pybricks.tools import StopWatch, wait
 from xAct_action import Action
@@ -453,12 +453,55 @@ class Robot:
                 return True
         return PrintPose(self)
 
-    def reset_odometry_action(self, _X, _Y, heading): 
+    def wait_action(self, duration_ms):
+        class WaitAction(Action):
+            def update(inner):
+                return inner.wait(duration_ms)
+        return WaitAction(self)
+
+    def straight_to_line_action(self, sensor, threshold, speed=50, stop = Stop.HOLD, stop_when="less"):
+        self._require_drive()
+        class StraightToLine(Action):
+            def on_start(inner):
+                inner.sensor = sensor if hasattr(sensor, "reflection") else ColorSensor(sensor)
+                inner.stop_when_less = (str(stop_when).lower() != "greater")
+                inner.target_heading = angle_wrap(self.hub.imu.heading())
+                inner.kp = 1.5
+                inner.max_correction = 40
+
+            def update(inner):
+                self.heading = angle_wrap(self.hub.imu.heading())
+                error = angle_wrap(inner.target_heading - self.heading)
+                correction = clamp(inner.kp * error, -inner.max_correction, inner.max_correction)
+                left_speed = clamp(speed + correction, -100, 100)
+                right_speed = clamp(speed - correction, -100, 100)
+                self.left.dc(left_speed)
+                self.right.dc(right_speed)
+                reflection = inner.sensor.reflection()
+                hit = reflection <= threshold if inner.stop_when_less else reflection >= threshold
+                if hit:
+                    self.left.dc(0)
+                    self.right.dc(0)
+                    try:
+                        self.left.stop(stop)
+                        self.right.stop(stop)
+                    except TypeError:
+                        self.left.stop()
+                        self.right.stop()
+                    self.beep()
+                    return True
+                return False
+        return StraightToLine(self)
+
+    def reset_odometry_action(self, _X=None, _Y=None, heading=None): 
         class ResetOdometryAction(Action):
             def update(inner_self):
-                self.X = _X
-                self.Y = _Y
-                self.hub.imu.reset_heading(heading)
+                if _X is not None:
+                    self.X = _X
+                if _Y is not None:
+                    self.Y = _Y
+                if heading is not None:
+                    self.hub.imu.reset_heading(heading)
             
                 return True
         return ResetOdometryAction(self)
