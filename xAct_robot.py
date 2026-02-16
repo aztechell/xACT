@@ -1,13 +1,11 @@
 # === xAct_robot.py ===
-# --- TODO: Выделить Actions в отдельный файл  --- 
 from pybricks.hubs import PrimeHub
 from pybricks.pupdevices import Motor, ColorSensor
-from pybricks.parameters import Port, Direction, Stop
-from pybricks.tools import StopWatch, wait
+from pybricks.parameters import Port, Direction, Stop, Button
+from pybricks.tools import StopWatch
 from xAct_action import Action
 import umath
 
-# --- TODO: Изменить на a = const  --- 
 def speed_control(ratio, max_speed, min_speed=30):     
     direction = 1 if max_speed >= 0 else -1
 
@@ -81,6 +79,22 @@ class Robot:
 
     def beep(self):
         self.hub.speaker.beep(880, 100)
+
+    def _pose_text(self, mode="drive", speed=None):
+        """
+        Build a pose string in different formats.
+
+        mode:
+          - "drive" (default): "robot.drive_to_point_action(_X = .., _Y = .., speed = ..),"
+          - "xyh": "X = .., Y = .., H = .."
+        speed: used only for drive_call (default 100)
+        """
+        mode = str(mode).lower()
+        if mode in ("xyh",):
+            return f"X = {self.X:.2f}, Y = {self.Y:.2f}, H = {self.heading:.2f}"
+        spd = 100 if speed is None else speed
+        return f"robot.drive_to_point_action(_X = {self.X:.2f}, _Y = {self.Y:.2f}, speed = {spd}),"
+        return f"X = {self.X:.2f}, Y = {self.Y:.2f}, H = {self.heading:.2f}"
 
     def _require_drive(self):
         if self.left is None or self.right is None:
@@ -446,12 +460,48 @@ class Robot:
                 return True
         return Sound(self)
 
-    def print_pose_action(self):
+    def print_pose_action(self, mode="drive", speed=None):
+        """
+        Print the current pose once.
+
+        mode:
+          - "drive" (default): "robot.drive_to_point_action(_X = .., _Y = .., speed = ..),"
+          - "xyh": "X = .., Y = .., H = .."
+        speed: used only for drive (default 100)
+        """
         class PrintPose(Action):
             def update(inner):
-                print(f"X = {self.X:.2f}, Y = {self.Y:.2f}, H = {self.heading:.2f}")
+                print(self._pose_text(mode, speed))
                 return True
         return PrintPose(self)
+
+    def print_pose_on_button_action(self, button=Button.CENTER, one_shot=True, beep=True, mode="drive", speed=None):
+        """
+        Print pose when a hub button is pressed.
+
+        button: which button to listen for (Button.CENTER by default).
+                Use button=None to accept any button.
+        one_shot: stop after the first print if True.
+        beep: beep on print if True.
+        mode/speed: same options as print_pose_action().
+        """
+        class PrintPoseOnButton(Action):
+            def __init__(inner, robot):
+                super().__init__(robot)
+                inner.was_pressed = False
+
+            def update(inner):
+                pressed = self.hub.buttons.pressed()
+                is_pressed = bool(pressed) if button is None else (button in pressed)
+                if is_pressed and not inner.was_pressed:
+                    print(self._pose_text(mode, speed))
+                    if beep:
+                        self.beep()
+                    if one_shot:
+                        return True
+                inner.was_pressed = is_pressed
+                return False
+        return PrintPoseOnButton(self)
 
     def wait_action(self, duration_ms):
         class WaitAction(Action):

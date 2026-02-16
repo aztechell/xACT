@@ -7,6 +7,7 @@ class Action:
         self._started = False     # для wait()
         self._timer = None
         self._initialized = False # для отложенной инициализации (on_start)
+        self._start_failed = False
 
     # -------------------------
     # Переопределяемые хуки
@@ -44,12 +45,17 @@ class Action:
         Внутренний вызов: если действие ещё не инициализировано — вызываем on_start(),
         затем вызываем update(). Возвращает результат update().
         """
+        if self._start_failed:
+            return True
         if not self._initialized:
             try:
                 self.on_start()
             except Exception as e:
-                # Если on_start упала — печатаем, но продолжаем, чтобы не ломать план
+                # if on_start fails, log and finish the action
                 print("Action.on_start() error:", e)
+                self._start_failed = True
+                self._initialized = True
+                return True
             self._initialized = True
         return self.update()
 
@@ -69,19 +75,29 @@ class SequentialAction(Action):
         return None
 
     def update(self):
-        # Если все под-действия выполнены — завершаем всю последовательность
+        # ???? ??? ???-???????? ????????? ? ????????? ??? ??????????????????
         if self.index >= len(self.actions):
             return True
 
         current = self.actions[self.index]
+        if current is None:
+            self.index += 1
+            return False
+        if not hasattr(current, "_safe_update"):
+            print("SequentialAction: invalid sub-action:", current)
+            self.actions[self.index] = None
+            self.index += 1
+            return False
         try:
-            # вызываем _safe_update, а не update напрямую
+            # ???????? _safe_update, ? ?? update ????????
             if current._safe_update():
-                # текущее действие закончилось — переходим к следующему
+                # ??????? ???????? ??????????? ? ????????? ? ??????????
+                self.actions[self.index] = None
                 self.index += 1
         except Exception as e:
-            # логируем ошибку, пропускаем проблемное действие
+            # ???????? ??????, ?????????? ?????????? ????????
             print("SequentialAction: sub-action failed:", e)
+            self.actions[self.index] = None
             self.index += 1
         return False
 
@@ -98,11 +114,16 @@ class ParallelAction(Action):
     def update(self):
         still_running = []
         for act in self.actions:
+            if act is None:
+                continue
+            if not hasattr(act, "_safe_update"):
+                print("ParallelAction: invalid sub-action:", act)
+                continue
             try:
                 if not act._safe_update():
                     still_running.append(act)
             except Exception as e:
-                # при падении одного действия — просто логируем и удаляем его из списка
+                # ??? ??????? ?????? ???????? ? ?????? ???????? ? ??????? ??? ?? ??????
                 print("ParallelAction: sub-action failed:", e)
         self.actions = still_running
         return len(self.actions) == 0
