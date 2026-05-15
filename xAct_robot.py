@@ -1,5 +1,4 @@
 # === xAct_robot.py ===
-from pybricks.hubs import PrimeHub
 from pybricks.pupdevices import Motor, ColorSensor
 from pybricks.parameters import Port, Direction, Stop, Button
 from pybricks.tools import StopWatch
@@ -35,7 +34,7 @@ def angle_wrap(value):
 class Robot:
     def __init__(
         self,
-        hub: PrimeHub,
+        hub,
         left_motor=Port.E,
         right_motor=Port.A,
         arm_left_port=None,
@@ -64,9 +63,9 @@ class Robot:
             self.ArmLeft.reset_angle(0)
         if self.ArmRight is not None:
             self.ArmRight.reset_angle(0)
-        self.wheel_diameter_cm = wheel_diameter_mm / 10.0
-        self.track_width_cm = track_width_mm / 10.0
-        self.wheel_cm_per_deg = (umath.pi * self.wheel_diameter_cm) / 360.0
+        self.wheel_diameter_mm = wheel_diameter_mm
+        self.track_width_mm = track_width_mm
+        self.wheel_mm_per_deg = (umath.pi * self.wheel_diameter_mm) / 360.0
 
         while not self.hub.imu.ready():
             pass
@@ -86,15 +85,14 @@ class Robot:
 
         mode:
           - "drive" (default): "robot.drive_to_point_action(_X = .., _Y = .., speed = ..),"
-          - "xyh": "X = .., Y = .., H = .."
+          - "xyh": "X = .. mm, Y = .. mm, H = .."
         speed: used only for drive_call (default 100)
         """
         mode = str(mode).lower()
         if mode in ("xyh",):
-            return f"X = {self.X:.2f}, Y = {self.Y:.2f}, H = {self.heading:.2f}"
+            return f"X = {self.X:.1f} mm, Y = {self.Y:.1f} mm, H = {self.heading:.1f}"
         spd = 100 if speed is None else speed
-        return f"robot.drive_to_point_action(_X = {self.X:.2f}, _Y = {self.Y:.2f}, speed = {spd}),"
-        return f"X = {self.X:.2f}, Y = {self.Y:.2f}, H = {self.heading:.2f}"
+        return f"robot.drive_to_point_action(_X = {self.X:.1f}, _Y = {self.Y:.1f}, speed = {spd}),"
 
     def _require_drive(self):
         if self.left is None or self.right is None:
@@ -142,7 +140,7 @@ class Robot:
 
                 dL = cur_left - inner.prev_left
                 dR = cur_right - inner.prev_right
-                dist = (dL + dR) * self.wheel_cm_per_deg * 0.5
+                dist = (dL + dR) * self.wheel_mm_per_deg * 0.5
 
                 self.X += dist * umath.cos(umath.radians(self.heading))
                 self.Y += dist * umath.sin(umath.radians(self.heading))
@@ -186,11 +184,11 @@ class Robot:
                 inner_self.target_heading_abs = umath.degrees(umath.atan2(inner_self.dy, inner_self.dx))
 
             def update(inner_self):
-                if inner_self.total_dist <= 0.0001:
+                if inner_self.total_dist <= 0.001:
                     self.left.stop()
                     self.right.stop()
                     self.beep()
-                    print(f"X = {self.X:.2f}, Y = {self.Y:.2f}, H = {self.heading:.2f}")
+                    print(f"X = {self.X:.1f} mm, Y = {self.Y:.1f} mm, H = {self.heading:.1f}")
                     return True
                 current_heading = self.heading
 
@@ -199,16 +197,16 @@ class Robot:
                 proj_len = (vec_to_robot_x * inner_self.dx + vec_to_robot_y * inner_self.dy) / inner_self.total_dist
                 dist_remain = inner_self.total_dist - proj_len
 
-                if dist_remain <= 0.05:  
+                if dist_remain <= 0.5:  
                     self.left.stop()
                     self.right.stop()
                     self.beep()
-                    print(f"X = {self.X:.2f}, Y = {self.Y:.2f}, H = {self.heading:.2f}")
+                    print(f"X = {self.X:.1f} mm, Y = {self.Y:.1f} mm, H = {self.heading:.1f}")
                     return True
 
                 signed_d = (inner_self.dy * (self.X - inner_self.start_x) - inner_self.dx * (self.Y - inner_self.start_y)) / inner_self.total_dist
 
-                lookahead = max(3, self.velocity * 0.3 + 3)
+                lookahead = max(30, self.velocity * 0.3 + 30)
                 target_heading = umath.degrees(umath.atan2(signed_d, lookahead))
                 effective_heading = (current_heading + 180) % 360 if inner_self.direction == -1 else current_heading
                 heading_error = angle_wrap(target_heading - (effective_heading - inner_self.target_heading_abs))
@@ -268,16 +266,16 @@ class Robot:
                 proj_len = (vec_to_robot_x * inner_self.dx + vec_to_robot_y * inner_self.dy) / inner_self.total_dist
                 dist_remain = inner_self.total_dist - proj_len
 
-                if dist_remain <= 0.05:  
+                if dist_remain <= 0.5:  
                     self.left.stop()
                     self.right.stop()
                     self.beep()
-                    print(f"X = {self.X:.2f}, Y = {self.Y:.2f}, H = {self.heading:.2f}")
+                    print(f"X = {self.X:.1f} mm, Y = {self.Y:.1f} mm, H = {self.heading:.1f}")
                     return True
 
                 signed_d = (inner_self.dy * (self.X - inner_self.start_x) - inner_self.dx * (self.Y - inner_self.start_y)) / inner_self.total_dist
 
-                lookahead = max(3, self.velocity * 0.3 + 3)
+                lookahead = max(30, self.velocity * 0.3 + 30)
                 target_heading = umath.degrees(umath.atan2(signed_d, lookahead))
                 effective_heading = (current_heading + 180) % 360 if inner_self.direction == -1 else current_heading
                 heading_error = angle_wrap(target_heading - (effective_heading - inner_self.target_heading_abs))
@@ -338,7 +336,7 @@ class Robot:
                     if now - inner.error_within_threshold_since > 100:
                         self.left.stop()
                         self.right.stop()
-                        print(f"X = {self.X:.2f}, Y = {self.Y:.2f}, H = {self.heading:.2f}")
+                        print(f"X = {self.X:.1f} mm, Y = {self.Y:.1f} mm, H = {self.heading:.1f}")
                         self.beep()
                         return True
                 else:
@@ -385,7 +383,7 @@ class Robot:
                     if now - inner.error_within_threshold_since > 100:
                         inner.wheel.stop()
                         inner.other_wheel.stop()
-                        print(f"X = {self.X:.2f}, Y = {self.Y:.2f}, H = {self.heading:.2f}")
+                        print(f"X = {self.X:.1f} mm, Y = {self.Y:.1f} mm, H = {self.heading:.1f}")
                         self.beep()
                         return True
                 else:
@@ -428,7 +426,7 @@ class Robot:
                 if inner_self.timer.time() >= waitTime * 1000:
                     self.beep()
                     if WallName == "U":
-                        self.X = 105.2
+                        self.X = 1052
                         self.hub.imu.reset_heading(180)
                     else:
                         self.X = 0
@@ -466,7 +464,7 @@ class Robot:
 
         mode:
           - "drive" (default): "robot.drive_to_point_action(_X = .., _Y = .., speed = ..),"
-          - "xyh": "X = .., Y = .., H = .."
+          - "xyh": "X = .. mm, Y = .. mm, H = .."
         speed: used only for drive (default 100)
         """
         class PrintPose(Action):
