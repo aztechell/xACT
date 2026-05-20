@@ -1,39 +1,33 @@
 # === xAct_action.py ===
 from pybricks.tools import StopWatch
 
+
 class Action:
     def __init__(self, robot):
         self.robot = robot
-        self._started = False     # для wait()
+        self._started = False     # for wait()
         self._timer = None
-        self._initialized = False # для отложенной инициализации (on_start)
+        self._initialized = False # for deferred initialization (on_start)
         self._start_failed = False
 
-    # -------------------------
-    # Переопределяемые хуки
-    # -------------------------
     def on_start(self):
         """
-        Вызывается один раз перед первым update().
-        Переопределяй в подклассах, если нужно получить
-        актуальное состояние робота в момент запуска действия.
+        Called once before the first update().
+        Override this in subclasses when the action needs fresh robot state
+        at the moment it starts.
         """
         return None
 
     def update(self):
         """
-        Основная логика действия — переопределяется в подклассах.
-        Должна возвращать True когда действие завершено, False — если ещё выполняется.
+        Main action logic. Return True when complete, False while running.
         """
         return True
 
-    # -------------------------
-    # Вспомогательные методы
-    # -------------------------
     def wait(self, duration_ms):
         """
-        Удобная функция для пауз внутри update().
-        Возвращает True, когда прошло >= duration_ms миллисекунд с момента первого вызова.
+        Non-blocking pause helper for update().
+        Returns True after duration_ms has passed since the first call.
         """
         if not self._started:
             self._timer = StopWatch()
@@ -42,8 +36,7 @@ class Action:
 
     def _safe_update(self):
         """
-        Внутренний вызов: если действие ещё не инициализировано — вызываем on_start(),
-        затем вызываем update(). Возвращает результат update().
+        Internal update wrapper. Calls on_start() once, then update().
         """
         if self._start_failed:
             return True
@@ -51,7 +44,6 @@ class Action:
             try:
                 self.on_start()
             except Exception as e:
-                # if on_start fails, log and finish the action
                 print("Action.on_start() error:", e)
                 self._start_failed = True
                 self._initialized = True
@@ -60,22 +52,16 @@ class Action:
         return self.update()
 
 
-# -------------------------
-# Composite actions
-# -------------------------
 class SequentialAction(Action):
     def __init__(self, robot, actions):
         super().__init__(robot)
-        # actions: список объектов Action (можно передать и "лениво" созданные)
         self.actions = actions
         self.index = 0
 
     def on_start(self):
-        # ничего особенного при старте последовательности
         return None
 
     def update(self):
-        # ???? ??? ???-???????? ????????? ? ????????? ??? ??????????????????
         if self.index >= len(self.actions):
             return True
 
@@ -89,13 +75,10 @@ class SequentialAction(Action):
             self.index += 1
             return False
         try:
-            # ???????? _safe_update, ? ?? update ????????
             if current._safe_update():
-                # ??????? ???????? ??????????? ? ????????? ? ??????????
                 self.actions[self.index] = None
                 self.index += 1
         except Exception as e:
-            # ???????? ??????, ?????????? ?????????? ????????
             print("SequentialAction: sub-action failed:", e)
             self.actions[self.index] = None
             self.index += 1
@@ -105,7 +88,6 @@ class SequentialAction(Action):
 class ParallelAction(Action):
     def __init__(self, robot, actions):
         super().__init__(robot)
-        # копируем список, чтобы внешние списки не влияли
         self.actions = list(actions)
 
     def on_start(self):
@@ -123,7 +105,37 @@ class ParallelAction(Action):
                 if not act._safe_update():
                     still_running.append(act)
             except Exception as e:
-                # ??? ??????? ?????? ???????? ? ?????? ???????? ? ??????? ??? ?? ??????
                 print("ParallelAction: sub-action failed:", e)
         self.actions = still_running
         return len(self.actions) == 0
+
+
+class ConditionalAction(Action):
+    def __init__(self, robot, condition, true_action, false_action=None):
+        super().__init__(robot)
+        self.condition = condition
+        self.true_action = true_action
+        self.false_action = false_action
+        self.selected = None
+
+    def _resolve_action(self, action):
+        if action is None:
+            return None
+        if isinstance(action, (list, tuple)):
+            return SequentialAction(self.robot, list(action))
+        if callable(action) and not hasattr(action, "_safe_update"):
+            return self._resolve_action(action())
+        return action
+
+    def on_start(self):
+        condition_result = self.condition() if callable(self.condition) else self.condition
+        action = self.true_action if condition_result else self.false_action
+        self.selected = self._resolve_action(action)
+
+    def update(self):
+        if self.selected is None:
+            return True
+        if not hasattr(self.selected, "_safe_update"):
+            print("ConditionalAction: invalid selected action:", self.selected)
+            return True
+        return self.selected._safe_update()

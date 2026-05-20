@@ -1,5 +1,5 @@
 # === xAct_robot_steer.py ===
-from pybricks.pupdevices import Motor
+from pybricks.pupdevices import Motor, UltrasonicSensor
 from pybricks.parameters import Port, Direction, Stop, Button
 from pybricks.tools import StopWatch
 from xAct_action import Action
@@ -143,6 +143,12 @@ class Robot:
     def _require_steer(self):
         if self.steer is None:
             raise RuntimeError("Steer motor not configured. Set steer_port.")
+
+    def _get_ultrasonic_sensor(self, sensor):
+        return sensor if hasattr(sensor, "distance") else UltrasonicSensor(sensor)
+
+    def ultrasonic_distance(self, sensor):
+        return self._get_ultrasonic_sensor(sensor).distance()
 
     def _calibrate_steer(self):
         if self.steer_calibrate_offset is not None:
@@ -546,6 +552,16 @@ class Robot:
                 print(f"X = {self.X:.1f} mm, Y = {self.Y:.1f} mm, H = {self.heading_abs:.1f}")
                 return True
         return PrintPose(self)
+
+    def print_ultrasonic_distance_action(self, sensor, label="Distance"):
+        class PrintUltrasonicDistance(Action):
+            def on_start(inner):
+                inner.sensor = self._get_ultrasonic_sensor(sensor)
+
+            def update(inner):
+                print(f"{label}: {inner.sensor.distance()} mm")
+                return True
+        return PrintUltrasonicDistance(self)
 
     def reset_odometry_action(self, _X=None, _Y=None, heading=None):
         class ResetOdometry(Action):

@@ -13,7 +13,7 @@ Both robot classes can work with any compatible Pybricks hub object. The current
 
 | File | Purpose |
 | --- | --- |
-| `xAct_action.py` | Base `Action`, `SequentialAction`, and `ParallelAction`. |
+| `xAct_action.py` | Base `Action`, `SequentialAction`, `ParallelAction`, and `ConditionalAction`. |
 | `xAct_robot.py` | Differential-drive robot actions. |
 | `xAct_robot_steer.py` | Single-drive + steering robot actions. |
 | `xAct_missions.py` | Mission list used by `xAct_fll_main.py`. |
@@ -94,6 +94,42 @@ ParallelAction(robot, [
 ])
 ```
 
+### `ConditionalAction(robot, condition, true_action, false_action=None)`
+
+Checks a condition when the action starts and then runs one selected branch. `condition` can be a function or a boolean value.
+
+```python
+from pybricks.parameters import Port
+from xAct_action import ConditionalAction
+
+ConditionalAction(
+    robot,
+    condition=lambda: robot.ultrasonic_distance(Port.C) < 300,
+    true_action=robot.arm_action("L", speed=500, angle=90),
+    false_action=robot.drive_to_point_action(_X=500, _Y=0, speed=70),
+)
+```
+
+Each branch can also be a list of actions. Lists are automatically wrapped in `SequentialAction`.
+
+```python
+ConditionalAction(
+    robot,
+    condition=lambda: robot.ultrasonic_distance(Port.C) < 300,
+    true_action=[
+        robot.arm_action("L", speed=500, angle=90),
+        robot.wait_action(300),
+        robot.arm_action("L", speed=500, angle=-90),
+    ],
+    false_action=[
+        robot.drive_to_point_action(_X=500, _Y=0, speed=70),
+        robot.print_pose_action(),
+    ],
+)
+```
+
+If `false_action` is omitted and the condition is false, the `ConditionalAction` finishes immediately.
+
 ## Differential-Drive Robot
 
 Use `xAct_robot.py` when the robot drives with independent left and right motors. The current implementation stores `X` and `Y` in millimeters.
@@ -155,18 +191,19 @@ robot.straight_action(400, speed=80)
 robot.straight_action(200, speed=-60)
 ```
 
-`turn_to_heading_action(target_heading, max_speed=50)`
+`turn_to_heading_action(target_heading, max_speed=50, tolerance=3, timeout_ms=5000)`
 
-Turns the robot to an absolute heading.
+Turns the robot to an absolute heading using `robot.heading`, so `odometry.update()` must keep running in the main loop. If it cannot reach the target before `timeout_ms`, it stops and finishes instead of blocking forever. Use `timeout_ms=None` to disable the timeout.
 
 ```python
 robot.turn_to_heading_action(90)
 robot.turn_to_heading_action(0, max_speed=40)
+robot.turn_to_heading_action(170, tolerance=5, timeout_ms=7000)
 ```
 
-`one_wheel_turn_action(Wheel_Name, angle, max_speed=50)`
+`one_wheel_turn_action(Wheel_Name, angle, max_speed=50, timeout_ms=5000)`
 
-Turns around one wheel. `Wheel_Name` is `"L"` or `"R"`.
+Turns around one wheel. `Wheel_Name` is `"L"` or `"R"`. If the turn cannot finish before `timeout_ms`, it stops and finishes instead of blocking forever. Use `timeout_ms=None` to disable the timeout.
 
 ```python
 robot.one_wheel_turn_action("L", 90, max_speed=60)
@@ -187,15 +224,15 @@ robot.straight_to_line_action(Port.C, threshold=70, speed=40, stop_when="greater
 
 `arm_action(Arm_Name, speed, angle, stop=Stop.HOLD, waiting=True)`
 
-Runs an arm motor by angle. `Arm_Name` is `"L"` or `"R"`.
+Runs an arm motor by angle. `Arm_Name` is `"L"` or `"R"`. With `waiting=True`, the action stays active until the motor finishes, but the main action loop keeps running. With `waiting=False`, the motor is started and the action finishes immediately.
 
 ```python
 robot.arm_action("L", speed=60, angle=120)
 ```
 
-`arm_dc(Arm_Name, speed, waitTime=0)`
+`arm_dc(Arm_Name, speed, waitTime=0, stop=Stop.HOLD)`
 
-Runs an arm motor with `dc(speed)` for `waitTime` seconds.
+Runs an arm motor with `dc(speed)` for `waitTime` seconds, then stops it with the selected stop mode.
 
 ```python
 robot.arm_dc("R", speed=-50, waitTime=0.5)
@@ -209,9 +246,9 @@ Runs one drive wheel by angle. `Wheel_Name` is `"L"` or `"R"`.
 robot.single_wheel_action("R", speed=70, angle=180)
 ```
 
-`wall_bump(WallName, speed, waitTime=0)`
+`wall_bump(WallName, speed, waitTime=0, stop=Stop.BRAKE)`
 
-Drives into a wall for a fixed time and then roughly resets position. If `WallName == "U"`, it sets `X = 1052` and heading `180`; otherwise it sets `X = 0` and heading `0`.
+Drives into a wall for a fixed time, stops the drive motors, and then roughly resets position. If `WallName == "U"`, it sets `X = 1052` and heading `180`; otherwise it sets `X = 0` and heading `0`.
 
 ```python
 robot.wall_bump("U", speed=40, waitTime=1)
@@ -234,6 +271,25 @@ Prints the current pose. Default mode prints a reusable `drive_to_point_action(.
 ```python
 robot.print_pose_action()
 robot.print_pose_action(mode="xyh")
+```
+
+`ultrasonic_distance(sensor)`
+
+Reads an ultrasonic sensor and returns distance in millimeters. `sensor` can be a port or an already created `UltrasonicSensor`.
+
+```python
+from pybricks.parameters import Port
+
+distance = robot.ultrasonic_distance(Port.C)
+print(distance)
+```
+
+`print_ultrasonic_distance_action(sensor, label="Distance")`
+
+Prints one ultrasonic distance reading as an action.
+
+```python
+robot.print_ultrasonic_distance_action(Port.C)
 ```
 
 `print_pose_on_button_action(button=Button.CENTER, one_shot=True, beep=True, mode="drive", speed=None)`
@@ -385,6 +441,25 @@ Prints position in millimeters and absolute heading.
 robot.print_pose_action()
 ```
 
+`ultrasonic_distance(sensor)`
+
+Reads an ultrasonic sensor and returns distance in millimeters. `sensor` can be a port or an already created `UltrasonicSensor`.
+
+```python
+from pybricks.parameters import Port
+
+distance = robot.ultrasonic_distance(Port.C)
+print(distance)
+```
+
+`print_ultrasonic_distance_action(sensor, label="Distance")`
+
+Prints one ultrasonic distance reading as an action.
+
+```python
+robot.print_ultrasonic_distance_action(Port.C)
+```
+
 `wait_action(duration_ms)` and `sound_action()`
 
 Work like the differential-drive versions.
@@ -398,7 +473,8 @@ Work like the differential-drive versions.
 ```python
 from xAct_missions import mission_list
 
-choice = hub_menu("1", "2", "3", "4", "5", "6", "7", "8")
+menu_items = tuple(str(i + 1) for i in range(len(mission_list)))
+choice = hub_menu(*menu_items)
 mission_func = mission_list[int(choice) - 1]
 actions = mission_func(robot)
 ```
@@ -457,7 +533,7 @@ Available in `xAct_robot_steer.py`. Tracks absolute heading so turns can go beyo
 ## Practical Notes
 
 - Keep `odometry.update()` in the main loop when using coordinate movement.
-- Put robot actions inside `SequentialAction` or `ParallelAction` when you want `on_start()` to run correctly.
+- Put robot actions inside `SequentialAction`, `ParallelAction`, or `ConditionalAction` when you want `on_start()` to run correctly.
 - Both robot implementations use millimeters for coordinates and distances.
 - Speed values passed to `dc()` and most `speed` arguments are usually in the `-100..100` range.
 - If a required motor is not configured, the relevant action raises `RuntimeError`.

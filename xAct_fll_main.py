@@ -16,12 +16,16 @@ robot = Robot(
 )
 odometry = robot.odometry_action()
 
+menu_items = tuple(str(i + 1) for i in range(len(mission_list)))
+if not menu_items:
+    raise RuntimeError("mission_list is empty. Add at least one mission in xAct_missions.py.")
+
 while True:
     # --- Show menu on hub display ---
-    choice = hub_menu("1", "2", "3", "4", "5", "6", "7", "8")
+    choice = hub_menu(*menu_items)
     print("Selected mission:", choice)
 
-    # Convert the choice ("1"–"7") to index (0–6)
+    # Convert the choice ("1", "2", ...) to a zero-based index.
     index = int(choice) - 1
 
     # --- Get and run mission ---
@@ -29,7 +33,7 @@ while True:
     actions = mission_func(robot)
 
     # Always include odometry
-    #actions.append(ParallelAction(robot, [robot.odometry_action()]))
+    # actions.append(ParallelAction(robot, [robot.odometry_action()]))
 
     hub.speaker.beep()
     wait(500)

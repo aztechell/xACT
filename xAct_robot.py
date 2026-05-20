@@ -1,5 +1,5 @@
 # === xAct_robot.py ===
-from pybricks.pupdevices import Motor, ColorSensor
+from pybricks.pupdevices import Motor, ColorSensor, UltrasonicSensor
 from pybricks.parameters import Port, Direction, Stop, Button
 from pybricks.tools import StopWatch
 from xAct_action import Action
@@ -120,6 +120,20 @@ class Robot:
             raise RuntimeError(f"{label} drive motor not configured.")
         return motor
 
+    def _stop_motor(self, motor, stop=Stop.BRAKE):
+        if stop == Stop.HOLD:
+            motor.hold()
+        elif stop == Stop.BRAKE:
+            motor.brake()
+        else:
+            motor.stop()
+
+    def _get_ultrasonic_sensor(self, sensor):
+        return sensor if hasattr(sensor, "distance") else UltrasonicSensor(sensor)
+
+    def ultrasonic_distance(self, sensor):
+        return self._get_ultrasonic_sensor(sensor).distance()
+
     # === Одометрия ===
     def odometry_action(self):
         self._require_drive()
@@ -197,7 +211,7 @@ class Robot:
                 proj_len = (vec_to_robot_x * inner_self.dx + vec_to_robot_y * inner_self.dy) / inner_self.total_dist
                 dist_remain = inner_self.total_dist - proj_len
 
-                if dist_remain <= 0.5:  
+                if dist_remain <= 5:
                     self.left.stop()
                     self.right.stop()
                     self.beep()
@@ -228,14 +242,14 @@ class Robot:
                 ratio = proj_len / inner_self.total_dist
                 current_speed = speed_control(ratio, speed)
 
-                self.left.dc(current_speed + correction)
-                self.right.dc(current_speed - correction)
+                self.left.dc(clamp(current_speed + correction, -100, 100))
+                self.right.dc(clamp(current_speed - correction, -100, 100))
 
                 return False
 
         return DriveToPointAction(self)
 
-    #  --- TODO: дублирует код, написать через drive_to_point  --- 
+    # TODO: This duplicates drive_to_point_action logic.
     def straight_action(self, _distance, speed=90):
         self._require_drive()
         class StraightAction(Action):
@@ -259,6 +273,13 @@ class Robot:
                 inner_self.target_heading_abs = umath.degrees(umath.atan2(inner_self.dy, inner_self.dx))
 
             def update(inner_self):
+                if inner_self.total_dist <= 0.001:
+                    self.left.stop()
+                    self.right.stop()
+                    self.beep()
+                    print(f"X = {self.X:.1f} mm, Y = {self.Y:.1f} mm, H = {self.heading:.1f}")
+                    return True
+
                 current_heading = self.heading
 
                 vec_to_robot_x = self.X - inner_self.start_x
@@ -266,7 +287,7 @@ class Robot:
                 proj_len = (vec_to_robot_x * inner_self.dx + vec_to_robot_y * inner_self.dy) / inner_self.total_dist
                 dist_remain = inner_self.total_dist - proj_len
 
-                if dist_remain <= 0.5:  
+                if dist_remain <= 5:
                     self.left.stop()
                     self.right.stop()
                     self.beep()
@@ -297,14 +318,14 @@ class Robot:
                 ratio = proj_len / inner_self.total_dist
                 current_speed = speed_control(ratio, speed)
 
-                self.left.dc(current_speed + correction)
-                self.right.dc(current_speed - correction)
+                self.left.dc(clamp(current_speed + correction, -100, 100))
+                self.right.dc(clamp(current_speed - correction, -100, 100))
 
                 return False
 
         return StraightAction(self)
 
-    def turn_to_heading_action(self, target_heading, max_speed=50):
+    def turn_to_heading_action(self, target_heading, max_speed=50, tolerance=3, timeout_ms=5000):
         self._require_drive()
         class Turn(Action):
             def on_start(inner):
@@ -316,12 +337,19 @@ class Robot:
                 inner.timer = StopWatch()  
                 inner.last_time = inner.timer.time()
                 inner.error_within_threshold_since = inner.last_time
+                inner.start_time = inner.last_time
 
             def update(inner):
                 error = angle_wrap(target_heading - self.heading)
                 now = inner.timer.time() 
                 dt = (now - inner.last_time) / 1000
-                if now > 100: inner.last_time = now
+                inner.last_time = now
+
+                if timeout_ms is not None and now - inner.start_time >= timeout_ms:
+                    self.left.stop()
+                    self.right.stop()
+                    print(f"Turn timeout: target = {target_heading}, H = {self.heading:.1f}, error = {error:.1f}")
+                    return True
 
                 if abs(error) < 5: inner.integral = clamp(inner.integral * 0.99 + error * dt, -50, 50)
                 derivative = angle_wrap(error - inner.prev_error) / dt if dt > 0 else 0
@@ -332,7 +360,7 @@ class Robot:
                 self.left.dc(clamp(U, -max_speed, max_speed))
                 self.right.dc(clamp(-U, -max_speed, max_speed))
 
-                if abs(error) < 2:
+                if abs(error) <= tolerance:
                     if now - inner.error_within_threshold_since > 100:
                         self.left.stop()
                         self.right.stop()
@@ -346,7 +374,7 @@ class Robot:
 
         return Turn(self)
 
-    def one_wheel_turn_action(self, Wheel_Name, angle, max_speed=50):
+    def one_wheel_turn_action(self, Wheel_Name, angle, max_speed=50, timeout_ms=5000):
         self._require_drive()
         class OneWheelTurn(Action):
             def on_start(inner):
@@ -359,6 +387,7 @@ class Robot:
                 inner.timer = StopWatch()
                 inner.last_time = inner.timer.time()
                 inner.error_within_threshold_since = inner.last_time
+                inner.start_time = inner.last_time
                 inner.wheel = self._get_wheel_motor(Wheel_Name)
                 inner.other_wheel = self.right if Wheel_Name == "L" else self.left
                 inner.wheel_sign = 1 if Wheel_Name == "L" else -1
@@ -367,7 +396,13 @@ class Robot:
                 error = angle_wrap(inner.target_heading - self.heading)
                 now = inner.timer.time()
                 dt = (now - inner.last_time) / 1000
-                if now > 100: inner.last_time = now
+                inner.last_time = now
+
+                if timeout_ms is not None and now - inner.start_time >= timeout_ms:
+                    inner.wheel.stop()
+                    inner.other_wheel.stop()
+                    print(f"One wheel turn timeout: target = {inner.target_heading}, H = {self.heading:.1f}, error = {error:.1f}")
+                    return True
 
                 if abs(error) < 5: inner.integral = clamp(inner.integral * 0.99 + error * dt, -50, 50)
                 derivative = angle_wrap(error - inner.prev_error) / dt if dt > 0 else 0
@@ -395,11 +430,15 @@ class Robot:
     def arm_action(self, Arm_Name, speed, angle, stop = Stop.HOLD, waiting = True):
         class ArmAction(Action):
             def on_start(inner):
-                self.Arm = self._get_arm_motor(Arm_Name)
+                inner.arm = self._get_arm_motor(Arm_Name)
+                inner.arm.run_angle(speed, angle, stop, wait=False)
 
             def update(inner):
-                self.Arm.run_angle(speed, angle, stop, waiting)
-                if waiting: self.beep()
+                if not waiting:
+                    return True
+                if hasattr(inner.arm, "done") and not inner.arm.done():
+                    return False
+                self.beep()
                 return True
         return ArmAction(self)
 
@@ -414,7 +453,7 @@ class Robot:
                 return True
         return SingleWheelAction(self)
 
-    def wall_bump(self, WallName, speed, waitTime = 0):
+    def wall_bump(self, WallName, speed, waitTime = 0, stop=Stop.BRAKE):
         self._require_drive()
         class WallBumpAction(Action):
             def on_start(inner_self):
@@ -424,6 +463,8 @@ class Robot:
                 self.left.dc(speed)
                 self.right.dc(speed)
                 if inner_self.timer.time() >= waitTime * 1000:
+                    self._stop_motor(self.left, stop)
+                    self._stop_motor(self.right, stop)
                     self.beep()
                     if WallName == "U":
                         self.X = 1052
@@ -436,15 +477,16 @@ class Robot:
 
         return WallBumpAction(self)
 
-    def arm_dc(self, Arm_Name, speed, waitTime = 0):
+    def arm_dc(self, Arm_Name, speed, waitTime = 0, stop=Stop.HOLD):
         class ArmDCAction(Action):
             def on_start(inner_self):
-                self.Arm = self._get_arm_motor(Arm_Name)
+                inner_self.arm = self._get_arm_motor(Arm_Name)
                 inner_self.timer = StopWatch()
 
             def update(inner_self):
-                self.Arm.dc(speed)
+                inner_self.arm.dc(speed)
                 if inner_self.timer.time() >= waitTime * 1000:
+                    self._stop_motor(inner_self.arm, stop)
                     self.beep()
                     return True
                 return False
@@ -472,6 +514,16 @@ class Robot:
                 print(self._pose_text(mode, speed))
                 return True
         return PrintPose(self)
+
+    def print_ultrasonic_distance_action(self, sensor, label="Distance"):
+        class PrintUltrasonicDistance(Action):
+            def on_start(inner):
+                inner.sensor = self._get_ultrasonic_sensor(sensor)
+
+            def update(inner):
+                print(f"{label}: {inner.sensor.distance()} mm")
+                return True
+        return PrintUltrasonicDistance(self)
 
     def print_pose_on_button_action(self, button=Button.CENTER, one_shot=True, beep=True, mode="drive", speed=None):
         """
@@ -513,12 +565,11 @@ class Robot:
             def on_start(inner):
                 inner.sensor = sensor if hasattr(sensor, "reflection") else ColorSensor(sensor)
                 inner.stop_when_less = (str(stop_when).lower() != "greater")
-                inner.target_heading = angle_wrap(self.hub.imu.heading())
+                inner.target_heading = self.heading
                 inner.kp = 1.5
                 inner.max_correction = 40
 
             def update(inner):
-                self.heading = angle_wrap(self.hub.imu.heading())
                 error = angle_wrap(inner.target_heading - self.heading)
                 correction = clamp(inner.kp * error, -inner.max_correction, inner.max_correction)
                 left_speed = clamp(speed + correction, -100, 100)
