@@ -159,6 +159,8 @@ Constructor arguments:
 - `track_width_mm` - distance between left and right wheels.
 - `left_dir`, `right_dir` - motor directions.
 
+The constructor waits up to 5 seconds for the IMU to become ready. If the IMU is still not ready, it raises `RuntimeError`.
+
 ### Movement
 
 `odometry_action()`
@@ -240,7 +242,7 @@ robot.arm_dc("R", speed=-50, waitTime=0.5)
 
 `single_wheel_action(Wheel_Name, speed, angle, stop=Stop.HOLD, waiting=True)`
 
-Runs one drive wheel by angle. `Wheel_Name` is `"L"` or `"R"`.
+Runs one drive wheel by angle. `Wheel_Name` is `"L"` or `"R"`. With `waiting=True`, the action stays active until the motor finishes, but the main action loop keeps running. With `waiting=False`, the motor is started and the action finishes immediately.
 
 ```python
 robot.single_wheel_action("R", speed=70, angle=180)
@@ -275,7 +277,7 @@ robot.print_pose_action(mode="xyh")
 
 `ultrasonic_distance(sensor)`
 
-Reads an ultrasonic sensor and returns distance in millimeters. `sensor` can be a port or an already created `UltrasonicSensor`.
+Reads an ultrasonic sensor and returns distance in millimeters. `sensor` can be a port or an already created `UltrasonicSensor`. When a port is passed, the robot caches the sensor object and reuses it.
 
 ```python
 from pybricks.parameters import Port
@@ -351,6 +353,8 @@ Constructor arguments:
 - `steer_inverted` - reverses steering sign.
 - `heading_zero` - initial absolute heading.
 
+The constructor waits up to 5 seconds for the IMU to become ready. If the IMU is still not ready, it raises `RuntimeError`.
+
 ### Tuning
 
 `set_drive_to_point_tuning(kp=None, ki=None, kd=None, max_steer_deg=None, min_speed=None, stop_dist_mm=None, i_limit=None, pose_offset_mm=None, max_accel_dist_mm=None, max_decel_dist_mm=None)`
@@ -390,9 +394,9 @@ robot.drive_to_point_action(_X=1000, _Y=0, speed=70)
 robot.drive_to_point_action(_X=1000, _Y=500, speed=60, stop_dist_mm=30)
 ```
 
-`turn_to_heading_action(target_heading, speed=30, max_steer_deg=None, kp=2.0, tolerance_deg=2.0, stop=Stop.HOLD)`
+`turn_to_heading_action(target_heading, speed=30, max_steer_deg=None, kp=2.0, tolerance_deg=2.0, stop=Stop.HOLD, timeout_ms=5000)`
 
-Turns toward a heading by driving and steering.
+Turns toward a heading by driving and steering. If it cannot reach the target before `timeout_ms`, it stops and finishes instead of blocking forever. Use `timeout_ms=None` to disable the timeout.
 
 ```python
 robot.turn_to_heading_action(90, speed=25)
@@ -443,7 +447,7 @@ robot.print_pose_action()
 
 `ultrasonic_distance(sensor)`
 
-Reads an ultrasonic sensor and returns distance in millimeters. `sensor` can be a port or an already created `UltrasonicSensor`.
+Reads an ultrasonic sensor and returns distance in millimeters. `sensor` can be a port or an already created `UltrasonicSensor`. When a port is passed, the robot caches the sensor object and reuses it.
 
 ```python
 from pybricks.parameters import Port

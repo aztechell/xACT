@@ -66,9 +66,12 @@ class Robot:
         self.wheel_diameter_mm = wheel_diameter_mm
         self.track_width_mm = track_width_mm
         self.wheel_mm_per_deg = (umath.pi * self.wheel_diameter_mm) / 360.0
+        self._ultrasonic_sensors = {}
 
+        imu_timer = StopWatch()
         while not self.hub.imu.ready():
-            pass
+            if imu_timer.time() >= 5000:
+                raise RuntimeError("IMU is not ready.")
         self.hub.imu.reset_heading(0)
 
         self.X = 0.0
@@ -129,7 +132,11 @@ class Robot:
             motor.stop()
 
     def _get_ultrasonic_sensor(self, sensor):
-        return sensor if hasattr(sensor, "distance") else UltrasonicSensor(sensor)
+        if hasattr(sensor, "distance"):
+            return sensor
+        if sensor not in self._ultrasonic_sensors:
+            self._ultrasonic_sensors[sensor] = UltrasonicSensor(sensor)
+        return self._ultrasonic_sensors[sensor]
 
     def ultrasonic_distance(self, sensor):
         return self._get_ultrasonic_sensor(sensor).distance()
@@ -445,11 +452,15 @@ class Robot:
     def single_wheel_action(self, Wheel_Name, speed, angle, stop = Stop.HOLD, waiting = True):
         class SingleWheelAction(Action):
             def on_start(inner):
-                self.Wheel = self._get_wheel_motor(Wheel_Name)
+                inner.wheel = self._get_wheel_motor(Wheel_Name)
+                inner.wheel.run_angle(speed, angle, stop, wait=False)
 
             def update(inner):
-                self.Wheel.run_angle(speed, angle, stop, waiting)
-                if waiting: self.beep()
+                if not waiting:
+                    return True
+                if hasattr(inner.wheel, "done") and not inner.wheel.done():
+                    return False
+                self.beep()
                 return True
         return SingleWheelAction(self)
 
@@ -460,8 +471,9 @@ class Robot:
                 inner_self.timer = StopWatch()
 
             def update(inner_self):
-                self.left.dc(speed)
-                self.right.dc(speed)
+                motor_speed = clamp(speed, -100, 100)
+                self.left.dc(motor_speed)
+                self.right.dc(motor_speed)
                 if inner_self.timer.time() >= waitTime * 1000:
                     self._stop_motor(self.left, stop)
                     self._stop_motor(self.right, stop)
@@ -484,7 +496,7 @@ class Robot:
                 inner_self.timer = StopWatch()
 
             def update(inner_self):
-                inner_self.arm.dc(speed)
+                inner_self.arm.dc(clamp(speed, -100, 100))
                 if inner_self.timer.time() >= waitTime * 1000:
                     self._stop_motor(inner_self.arm, stop)
                     self.beep()
@@ -581,12 +593,8 @@ class Robot:
                 if hit:
                     self.left.dc(0)
                     self.right.dc(0)
-                    try:
-                        self.left.stop(stop)
-                        self.right.stop(stop)
-                    except TypeError:
-                        self.left.stop()
-                        self.right.stop()
+                    self._stop_motor(self.left, stop)
+                    self._stop_motor(self.right, stop)
                     self.beep()
                     return True
                 return False

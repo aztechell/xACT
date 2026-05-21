@@ -2,6 +2,10 @@
 from pybricks.tools import StopWatch
 
 
+def _action_name(action):
+    return action.__class__.__name__
+
+
 class Action:
     def __init__(self, robot):
         self.robot = robot
@@ -44,7 +48,7 @@ class Action:
             try:
                 self.on_start()
             except Exception as e:
-                print("Action.on_start() error:", e)
+                print(f"{_action_name(self)}.on_start() error: {e}")
                 self._start_failed = True
                 self._initialized = True
                 return True
@@ -79,7 +83,7 @@ class SequentialAction(Action):
                 self.actions[self.index] = None
                 self.index += 1
         except Exception as e:
-            print("SequentialAction: sub-action failed:", e)
+            print(f"SequentialAction: {_action_name(current)} failed: {e}")
             self.actions[self.index] = None
             self.index += 1
         return False
@@ -105,7 +109,7 @@ class ParallelAction(Action):
                 if not act._safe_update():
                     still_running.append(act)
             except Exception as e:
-                print("ParallelAction: sub-action failed:", e)
+                print(f"ParallelAction: {_action_name(act)} failed: {e}")
         self.actions = still_running
         return len(self.actions) == 0
 

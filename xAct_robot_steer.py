@@ -93,6 +93,7 @@ class Robot:
         self.drive_gear_ratio = drive_gear_ratio
         self.wheel_diameter_mm = wheel_diameter_mm
         self.wheel_mm_per_deg = (umath.pi * self.wheel_diameter_mm) / 360.0
+        self._ultrasonic_sensors = {}
 
         self.steer_speed = steer_speed
         self.max_steer_deg = max_steer_deg
@@ -100,11 +101,10 @@ class Robot:
         self.steer_sign = -1 if steer_inverted else 1
         self.steer_calibrate_offset = steer_calibrate_offset
 
-        try:
-            while not self.hub.imu.ready():
-                pass
-        except Exception:
-            pass
+        imu_timer = StopWatch()
+        while not self.hub.imu.ready():
+            if imu_timer.time() >= 5000:
+                raise RuntimeError("IMU is not ready.")
 
         self._heading = HeadingTracker(self.hub.imu)
         self._heading.zero(heading_zero)
@@ -145,7 +145,11 @@ class Robot:
             raise RuntimeError("Steer motor not configured. Set steer_port.")
 
     def _get_ultrasonic_sensor(self, sensor):
-        return sensor if hasattr(sensor, "distance") else UltrasonicSensor(sensor)
+        if hasattr(sensor, "distance"):
+            return sensor
+        if sensor not in self._ultrasonic_sensors:
+            self._ultrasonic_sensors[sensor] = UltrasonicSensor(sensor)
+        return self._ultrasonic_sensors[sensor]
 
     def ultrasonic_distance(self, sensor):
         return self._get_ultrasonic_sensor(sensor).distance()
@@ -171,12 +175,17 @@ class Robot:
         target = target * self.steer_sign + self.steer_center
         self.steer.run_target(self.steer_speed, target, then=Stop.HOLD, wait=wait)
 
+    def _stop_motor(self, motor, stop=Stop.BRAKE):
+        if stop == Stop.HOLD:
+            motor.hold()
+        elif stop == Stop.BRAKE:
+            motor.brake()
+        else:
+            motor.stop()
+
     def _stop_drive(self, stop=Stop.BRAKE, center_steer=True):
         if self.drive is not None:
-            try:
-                self.drive.stop(stop)
-            except TypeError:
-                self.drive.stop()
+            self._stop_motor(self.drive, stop)
         if center_steer and self.steer is not None:
             self._set_steer_target(0, wait=False)
 
@@ -303,13 +312,13 @@ class Robot:
                 current_speed = speed_control(ratio, inner.max_speed, min_speed=min_speed)
                 self.drive.dc(current_speed)
 
-                err = inner.target_heading - self.heading_abs
+                err = angle_wrap(inner.target_heading - self.heading_abs)
                 now = inner.timer.time()
                 dt = (now - inner.last_time) / 1000
                 inner.last_time = now
 
                 inner.integral = inner.integral * 0.8 + err * dt
-                derivative = (err - inner.prev_error) / dt if dt > 0 else 0
+                derivative = angle_wrap(err - inner.prev_error) / dt if dt > 0 else 0
                 inner.prev_error = err
 
                 steer_cmd = kp * err + ki * inner.integral + kd * derivative
@@ -482,13 +491,23 @@ class Robot:
         kp=2.0,
         tolerance_deg=2.0,
         stop=Stop.HOLD,
+        timeout_ms=5000,
     ):
         self._require_drive()
         self._require_steer()
         class Turn(Action):
+            def on_start(inner):
+                inner.timer = StopWatch()
+                inner.start_time = inner.timer.time()
+
             def update(inner):
                 self._update_heading()
                 err = angle_wrap(target_heading - self.heading_abs)
+                if timeout_ms is not None and inner.timer.time() - inner.start_time >= timeout_ms:
+                    self._stop_drive(stop=stop, center_steer=True)
+                    print(f"Steer turn timeout: target = {target_heading}, H = {self.heading_abs:.1f}, error = {err:.1f}")
+                    return True
+
                 if abs(err) <= tolerance_deg:
                     self._stop_drive(stop=stop, center_steer=True)
                     self.beep()
