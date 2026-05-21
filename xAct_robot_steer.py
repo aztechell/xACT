@@ -130,12 +130,6 @@ class Robot:
         self.drive_to_point_max_accel_dist_mm = 100
         self.drive_to_point_max_decel_dist_mm = 100
 
-    def beep(self):
-        try:
-            self.hub.speaker.beep(880, 100)
-        except AttributeError:
-            pass
-
     def _require_drive(self):
         if self.drive is None:
             raise RuntimeError("Drive motor not configured. Set drive_port.")
@@ -150,9 +144,6 @@ class Robot:
         if sensor not in self._ultrasonic_sensors:
             self._ultrasonic_sensors[sensor] = UltrasonicSensor(sensor)
         return self._ultrasonic_sensors[sensor]
-
-    def ultrasonic_distance(self, sensor):
-        return self._get_ultrasonic_sensor(sensor).distance()
 
     def _calibrate_steer(self):
         if self.steer_calibrate_offset is not None:
@@ -188,6 +179,15 @@ class Robot:
             self._stop_motor(self.drive, stop)
         if center_steer and self.steer is not None:
             self._set_steer_target(0, wait=False)
+
+    def ultrasonic_distance(self, sensor):
+        return self._get_ultrasonic_sensor(sensor).distance()
+
+    def beep(self):
+        try:
+            self.hub.speaker.beep(880, 100)
+        except AttributeError:
+            pass
 
     def set_drive_to_point_tuning(
         self,
@@ -254,6 +254,20 @@ class Robot:
                     inner.last_time = t
                 return False
         return Odom(self)
+
+    def reset_odometry_action(self, x=None, y=None, heading=None):
+        class ResetOdometry(Action):
+            def update(inner):
+                if x is not None:
+                    self.X = x
+                if y is not None:
+                    self.Y = y
+                if heading is not None:
+                    self._heading.zero(heading)
+                    self.heading_abs = heading
+                    self.heading = angle_wrap(heading)
+                return True
+        return ResetOdometry(self)
 
     # === Drive distance with gyro hold ===
     def drive_distance_action(
@@ -331,8 +345,8 @@ class Robot:
     # === Drive to target point (requires odometry_action running) ===
     def drive_to_point_action(
         self,
-        _X=None,
-        _Y=None,
+        x=None,
+        y=None,
         speed=60,
         kp=None,
         kd=None,
@@ -353,8 +367,8 @@ class Robot:
                 self._update_heading()
                 inner.start_x = self.X
                 inner.start_y = self.Y
-                inner.target_x = self.X if _X is None else _X
-                inner.target_y = self.Y if _Y is None else _Y
+                inner.target_x = self.X if x is None else x
+                inner.target_y = self.Y if y is None else y
                 inner.offset_mm = (
                     self.drive_to_point_pose_offset_mm
                     if pose_offset_mm is None
@@ -581,17 +595,3 @@ class Robot:
                 print(f"{label}: {inner.sensor.distance()} mm")
                 return True
         return PrintUltrasonicDistance(self)
-
-    def reset_odometry_action(self, _X=None, _Y=None, heading=None):
-        class ResetOdometry(Action):
-            def update(inner):
-                if _X is not None:
-                    self.X = _X
-                if _Y is not None:
-                    self.Y = _Y
-                if heading is not None:
-                    self._heading.zero(heading)
-                    self.heading_abs = heading
-                    self.heading = angle_wrap(heading)
-                return True
-        return ResetOdometry(self)

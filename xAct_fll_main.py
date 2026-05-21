@@ -1,11 +1,10 @@
 from pybricks.hubs import PrimeHub
-from pybricks.tools import wait, hub_menu
 from pybricks.parameters import Axis, Port
-from xAct_action import ParallelAction, SequentialAction
+from pybricks.tools import hub_menu, wait
+from xAct_action import run_actions
 from xAct_robot import Robot
 from xAct_missions import mission_list  # list of mission functions
 
-# --- Initialize hub and robot ---
 hub = PrimeHub(front_side=Axis.Y, top_side=Axis.Z)
 robot = Robot(
     hub,
@@ -20,27 +19,20 @@ menu_items = tuple(str(i + 1) for i in range(len(mission_list)))
 if not menu_items:
     raise RuntimeError("mission_list is empty. Add at least one mission in xAct_missions.py.")
 
-while True:
-    # --- Show menu on hub display ---
+
+def mission(robot):
     choice = hub_menu(*menu_items)
     print("Selected mission:", choice)
 
-    # Convert the choice ("1", "2", ...) to a zero-based index.
     index = int(choice) - 1
-
-    # --- Get and run mission ---
     mission_func = mission_list[index]
-    actions = mission_func(robot)
+    return mission_func(robot)
 
-    # Always include odometry
-    # actions.append(ParallelAction(robot, [robot.odometry_action()]))
 
-    hub.speaker.beep()
+while True:
+    actions = mission(robot)
+
+    robot.beep()
     wait(500)
 
-    # --- Run actions sequentially ---
-    while actions:
-        odometry.update()
-        for action in actions[:]:
-            if action.update():
-                actions.remove(action)
+    run_actions(robot, actions, odometry)

@@ -79,15 +79,12 @@ class Robot:
         self.heading = 0.0
         self.velocity = 0.0
 
-    def beep(self):
-        self.hub.speaker.beep(880, 100)
-
     def _pose_text(self, mode="drive", speed=None):
         """
         Build a pose string in different formats.
 
         mode:
-          - "drive" (default): "robot.drive_to_point_action(_X = .., _Y = .., speed = ..),"
+          - "drive" (default): "robot.drive_to_point_action(x = .., y = .., speed = ..),"
           - "xyh": "X = .. mm, Y = .. mm, H = .."
         speed: used only for drive_call (default 100)
         """
@@ -95,7 +92,7 @@ class Robot:
         if mode in ("xyh",):
             return f"X = {self.X:.1f} mm, Y = {self.Y:.1f} mm, H = {self.heading:.1f}"
         spd = 100 if speed is None else speed
-        return f"robot.drive_to_point_action(_X = {self.X:.1f}, _Y = {self.Y:.1f}, speed = {spd}),"
+        return f"robot.drive_to_point_action(x = {self.X:.1f}, y = {self.Y:.1f}, speed = {spd}),"
 
     def _require_drive(self):
         if self.left is None or self.right is None:
@@ -141,7 +138,10 @@ class Robot:
     def ultrasonic_distance(self, sensor):
         return self._get_ultrasonic_sensor(sensor).distance()
 
-    # === Одометрия ===
+    def beep(self):
+        self.hub.speaker.beep(880, 100)
+
+    # === Odometry ===
     def odometry_action(self):
         self._require_drive()
         class Odom(Action):
@@ -149,8 +149,8 @@ class Robot:
                 super().__init__(robot)
                 inner.prev_left = self.left.angle()
                 inner.prev_right = self.right.angle()
-                inner.prev_X = self.X
-                inner.prev_Y = self.Y
+                inner.prev_x = self.X
+                inner.prev_y = self.Y
                 inner.timer = StopWatch()
                 inner.last_time = inner.timer.time()
 
@@ -169,21 +169,33 @@ class Robot:
                 inner.prev_left = cur_left
                 inner.prev_right = cur_right
 
-                # вычисление скорости (скалярная) 
+                # Scalar velocity.
                 t = inner.timer.time()
                 dt = (t - inner.last_time) / 1000
                 if dt > 0.05:
-                    dx = self.X - inner.prev_X
-                    dy = self.Y - inner.prev_Y
+                    dx = self.X - inner.prev_x
+                    dy = self.Y - inner.prev_y
                     self.velocity = umath.sqrt(dx*dx + dy*dy) / dt
-                    inner.prev_X, inner.prev_Y = self.X, self.Y
+                    inner.prev_x, inner.prev_y = self.X, self.Y
                     inner.last_time = t
 
                 return False
         return Odom(self)
 
-    # === Езда до точки ===
-    def drive_to_point_action(self, _X=None, _Y=None, speed=90):
+    def reset_odometry_action(self, x=None, y=None, heading=None):
+        class ResetOdometryAction(Action):
+            def update(inner_self):
+                if x is not None:
+                    self.X = x
+                if y is not None:
+                    self.Y = y
+                if heading is not None:
+                    self.hub.imu.reset_heading(heading)
+
+                return True
+        return ResetOdometryAction(self)
+
+    def drive_to_point_action(self, x=None, y=None, speed=90):
         self._require_drive()
         class DriveToPointAction(Action):
             def on_start(inner_self):
@@ -197,8 +209,8 @@ class Robot:
                 inner_self.prev_error = 0
                 inner_self.integral = 0
 
-                inner_self.target_x = self.X if _X is None else _X
-                inner_self.target_y = self.Y if _Y is None else _Y
+                inner_self.target_x = self.X if x is None else x
+                inner_self.target_y = self.Y if y is None else y
                 inner_self.dx = inner_self.target_x - inner_self.start_x
                 inner_self.dy = inner_self.target_y - inner_self.start_y
                 inner_self.total_dist = umath.sqrt(inner_self.dx**2 + inner_self.dy**2)
@@ -256,8 +268,7 @@ class Robot:
 
         return DriveToPointAction(self)
 
-    # TODO: This duplicates drive_to_point_action logic.
-    def straight_action(self, _distance, speed=90):
+    def straight_action(self, distance, speed=90):
         self._require_drive()
         class StraightAction(Action):
             def on_start(inner_self):
@@ -271,11 +282,11 @@ class Robot:
                 inner_self.prev_error = 0
                 inner_self.integral = 0
 
-                _X = self.X + (umath.cos(umath.radians(self.heading)) * _distance) * (-1 if speed < 0 else 1)
-                _Y = self.Y + (umath.sin(umath.radians(self.heading)) * _distance) * (-1 if speed < 0 else 1)
+                target_x = self.X + (umath.cos(umath.radians(self.heading)) * distance) * (-1 if speed < 0 else 1)
+                target_y = self.Y + (umath.sin(umath.radians(self.heading)) * distance) * (-1 if speed < 0 else 1)
 
-                inner_self.dx = _X - inner_self.start_x
-                inner_self.dy = _Y - inner_self.start_y
+                inner_self.dx = target_x - inner_self.start_x
+                inner_self.dy = target_y - inner_self.start_y
                 inner_self.total_dist = umath.sqrt(inner_self.dx**2 + inner_self.dy**2)
                 inner_self.target_heading_abs = umath.degrees(umath.atan2(inner_self.dy, inner_self.dx))
 
@@ -381,7 +392,7 @@ class Robot:
 
         return Turn(self)
 
-    def one_wheel_turn_action(self, Wheel_Name, angle, max_speed=50, timeout_ms=5000):
+    def one_wheel_turn_action(self, wheel, angle, max_speed=50, timeout_ms=5000):
         self._require_drive()
         class OneWheelTurn(Action):
             def on_start(inner):
@@ -395,9 +406,9 @@ class Robot:
                 inner.last_time = inner.timer.time()
                 inner.error_within_threshold_since = inner.last_time
                 inner.start_time = inner.last_time
-                inner.wheel = self._get_wheel_motor(Wheel_Name)
-                inner.other_wheel = self.right if Wheel_Name == "L" else self.left
-                inner.wheel_sign = 1 if Wheel_Name == "L" else -1
+                inner.wheel = self._get_wheel_motor(wheel)
+                inner.other_wheel = self.right if wheel == "L" else self.left
+                inner.wheel_sign = 1 if wheel == "L" else -1
 
             def update(inner):
                 error = angle_wrap(inner.target_heading - self.heading)
@@ -434,10 +445,39 @@ class Robot:
                 return False
         return OneWheelTurn(self)
 
-    def arm_action(self, Arm_Name, speed, angle, stop = Stop.HOLD, waiting = True):
+    def straight_to_line_action(self, sensor, threshold, speed=50, stop=Stop.HOLD, stop_when="less"):
+        self._require_drive()
+        class StraightToLine(Action):
+            def on_start(inner):
+                inner.sensor = sensor if hasattr(sensor, "reflection") else ColorSensor(sensor)
+                inner.stop_when_less = (str(stop_when).lower() != "greater")
+                inner.target_heading = self.heading
+                inner.kp = 1.5
+                inner.max_correction = 40
+
+            def update(inner):
+                error = angle_wrap(inner.target_heading - self.heading)
+                correction = clamp(inner.kp * error, -inner.max_correction, inner.max_correction)
+                left_speed = clamp(speed + correction, -100, 100)
+                right_speed = clamp(speed - correction, -100, 100)
+                self.left.dc(left_speed)
+                self.right.dc(right_speed)
+                reflection = inner.sensor.reflection()
+                hit = reflection <= threshold if inner.stop_when_less else reflection >= threshold
+                if hit:
+                    self.left.dc(0)
+                    self.right.dc(0)
+                    self._stop_motor(self.left, stop)
+                    self._stop_motor(self.right, stop)
+                    self.beep()
+                    return True
+                return False
+        return StraightToLine(self)
+
+    def arm_action(self, arm, speed, angle, stop=Stop.HOLD, waiting=True):
         class ArmAction(Action):
             def on_start(inner):
-                inner.arm = self._get_arm_motor(Arm_Name)
+                inner.arm = self._get_arm_motor(arm)
                 inner.arm.run_angle(speed, angle, stop, wait=False)
 
             def update(inner):
@@ -449,10 +489,10 @@ class Robot:
                 return True
         return ArmAction(self)
 
-    def single_wheel_action(self, Wheel_Name, speed, angle, stop = Stop.HOLD, waiting = True):
+    def single_wheel_action(self, wheel, speed, angle, stop=Stop.HOLD, waiting=True):
         class SingleWheelAction(Action):
             def on_start(inner):
-                inner.wheel = self._get_wheel_motor(Wheel_Name)
+                inner.wheel = self._get_wheel_motor(wheel)
                 inner.wheel.run_angle(speed, angle, stop, wait=False)
 
             def update(inner):
@@ -464,7 +504,7 @@ class Robot:
                 return True
         return SingleWheelAction(self)
 
-    def wall_bump(self, WallName, speed, waitTime = 0, stop=Stop.BRAKE):
+    def wall_bump_action(self, wall, speed, duration_ms=0, stop=Stop.BRAKE):
         self._require_drive()
         class WallBumpAction(Action):
             def on_start(inner_self):
@@ -474,11 +514,11 @@ class Robot:
                 motor_speed = clamp(speed, -100, 100)
                 self.left.dc(motor_speed)
                 self.right.dc(motor_speed)
-                if inner_self.timer.time() >= waitTime * 1000:
+                if inner_self.timer.time() >= duration_ms:
                     self._stop_motor(self.left, stop)
                     self._stop_motor(self.right, stop)
                     self.beep()
-                    if WallName == "U":
+                    if wall == "U":
                         self.X = 1052
                         self.hub.imu.reset_heading(180)
                     else:
@@ -489,15 +529,15 @@ class Robot:
 
         return WallBumpAction(self)
 
-    def arm_dc(self, Arm_Name, speed, waitTime = 0, stop=Stop.HOLD):
+    def arm_dc_action(self, arm, speed, duration_ms=0, stop=Stop.HOLD):
         class ArmDCAction(Action):
             def on_start(inner_self):
-                inner_self.arm = self._get_arm_motor(Arm_Name)
+                inner_self.arm = self._get_arm_motor(arm)
                 inner_self.timer = StopWatch()
 
             def update(inner_self):
                 inner_self.arm.dc(clamp(speed, -100, 100))
-                if inner_self.timer.time() >= waitTime * 1000:
+                if inner_self.timer.time() >= duration_ms:
                     self._stop_motor(inner_self.arm, stop)
                     self.beep()
                     return True
@@ -517,7 +557,7 @@ class Robot:
         Print the current pose once.
 
         mode:
-          - "drive" (default): "robot.drive_to_point_action(_X = .., _Y = .., speed = ..),"
+          - "drive" (default): "robot.drive_to_point_action(x = .., y = .., speed = ..),"
           - "xyh": "X = .. mm, Y = .. mm, H = .."
         speed: used only for drive (default 100)
         """
@@ -570,46 +610,4 @@ class Robot:
             def update(inner):
                 return inner.wait(duration_ms)
         return WaitAction(self)
-
-    def straight_to_line_action(self, sensor, threshold, speed=50, stop = Stop.HOLD, stop_when="less"):
-        self._require_drive()
-        class StraightToLine(Action):
-            def on_start(inner):
-                inner.sensor = sensor if hasattr(sensor, "reflection") else ColorSensor(sensor)
-                inner.stop_when_less = (str(stop_when).lower() != "greater")
-                inner.target_heading = self.heading
-                inner.kp = 1.5
-                inner.max_correction = 40
-
-            def update(inner):
-                error = angle_wrap(inner.target_heading - self.heading)
-                correction = clamp(inner.kp * error, -inner.max_correction, inner.max_correction)
-                left_speed = clamp(speed + correction, -100, 100)
-                right_speed = clamp(speed - correction, -100, 100)
-                self.left.dc(left_speed)
-                self.right.dc(right_speed)
-                reflection = inner.sensor.reflection()
-                hit = reflection <= threshold if inner.stop_when_less else reflection >= threshold
-                if hit:
-                    self.left.dc(0)
-                    self.right.dc(0)
-                    self._stop_motor(self.left, stop)
-                    self._stop_motor(self.right, stop)
-                    self.beep()
-                    return True
-                return False
-        return StraightToLine(self)
-
-    def reset_odometry_action(self, _X=None, _Y=None, heading=None): 
-        class ResetOdometryAction(Action):
-            def update(inner_self):
-                if _X is not None:
-                    self.X = _X
-                if _Y is not None:
-                    self.Y = _Y
-                if heading is not None:
-                    self.hub.imu.reset_heading(heading)
-            
-                return True
-        return ResetOdometryAction(self)
 

@@ -6,6 +6,25 @@ def _action_name(action):
     return action.__class__.__name__
 
 
+def run_actions(robot, actions, odometry=None):
+    while actions:
+        if odometry is not None:
+            odometry.update()
+
+        for action in actions[:]:
+            if action is None:
+                actions.remove(action)
+                continue
+
+            if not hasattr(action, "_safe_update"):
+                print("run_actions: invalid action:", action)
+                actions.remove(action)
+                continue
+
+            if action._safe_update():
+                actions.remove(action)
+
+
 class Action:
     def __init__(self, robot):
         self.robot = robot
